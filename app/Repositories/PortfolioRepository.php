@@ -8,16 +8,28 @@ use Illuminate\Contracts\Filesystem\Filesystem;
  * Class PortfolioRepository
  * @package App\Repositories
  */
-class PortfolioRepository
+class PortfolioRepository implements Contracts\PortfolioRepository
 {
-    public function getAll()
+    /**
+     * @var \Illuminate\Contracts\Filesystem\Filesystem
+     */
+    private $filesystem;
+    private $threshold;
+
+    public function __construct(Filesystem $filesystem, $threshold)
+    {
+        $this->filesystem = $filesystem;
+        $this->threshold = $threshold;
+    }
+
+    public function getAll(Filesystem $filesystem)
     {
         $portfolios = collect();
-        foreach (resolve(Filesystem::class)->files() as $file) {
+        foreach ($filesystem->files() as $file) {
             if ($file === '.gitignore') {
                 continue;
             }
-            $contents = resolve(Filesystem::class)->get($file);
+            $contents = $filesystem->get($file);
             $portfolios[] = json_decode($contents, true);
         }
         return $portfolios;
@@ -27,6 +39,6 @@ class PortfolioRepository
     {
         $json = collect($data)->only('name', 'memo')->toJson(JSON_UNESCAPED_UNICODE);
 
-        resolve(Filesystem::class)->put("{$data['name']}.txt", $json);
+        $this->filesystem->put("{$data['name']}.txt", $json);
     }
 }
