@@ -5,10 +5,10 @@ namespace App\Repositories;
 use Illuminate\Contracts\Filesystem\Filesystem;
 
 /**
- * Class PortfolioRepository
+ * Class ThingRepository
  * @package App\Repositories
  */
-class PortfolioRepository implements Contracts\PortfolioRepository
+class ThingRepository implements Contracts\ThingRepository
 {
     /**
      * @var \Illuminate\Contracts\Filesystem\Filesystem
@@ -24,15 +24,15 @@ class PortfolioRepository implements Contracts\PortfolioRepository
 
     public function getAll(Filesystem $filesystem)
     {
-        $portfolios = collect();
+        $things = collect();
         foreach ($filesystem->files() as $file) {
             if ($file === '.gitignore') {
                 continue;
             }
             $contents = $filesystem->get($file);
-            $portfolios[] = json_decode($contents, true);
+            $things[] = json_decode($contents, true);
         }
-        return $portfolios;
+        return $things;
     }
 
     public function create(array $data)

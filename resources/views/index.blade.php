@@ -32,12 +32,12 @@
 <section class="container my-5">
     <h4><small>データ</small></h4>
     <div class="row">
-        @foreach($portfolios as $portfolio)
+        @foreach($things as $thing)
             <div class="col-sm-6">
                 <div class="card">
                     <div class="card-body">
-                        <h5 class="card-title">{{ $portfolio['name'] }}</h5>
-                        <p class="card-text">{{ $portfolio['memo'] }}</p>
+                        <h5 class="card-title">{{ $thing['name'] }}</h5>
+                        <p class="card-text">{{ $thing['memo'] }}</p>
                     </div>
                 </div>
             </div>

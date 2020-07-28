@@ -5,10 +5,10 @@ namespace App\Repositories\Contracts;
 use Illuminate\Contracts\Filesystem\Filesystem;
 
 /**
- * Class PortfolioRepository
+ * Class ThingRepository
  * @package App\Repositories
  */
-interface PortfolioRepository
+interface ThingRepository
 {
     public function __construct(Filesystem $filesystem, $threshold);
 
