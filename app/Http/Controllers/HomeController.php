@@ -8,7 +8,7 @@ use Illuminate\Http\Request;
 class HomeController extends Controller
 {
     /**
-     * @var \App\Repositories\ThingRepository
+     * @var \App\Repositories\Contracts\ThingRepository
      */
     public $repository;
 
@@ -17,9 +17,9 @@ class HomeController extends Controller
         $this->repository = $repository;
     }
 
-    public function index()
+    public function index(Request $request)
     {
-        $things = app()->call([$this->repository, 'getAll']);
+        $things = $this->repository->search($request->query());
 
         return view('index', compact('things'));
     }

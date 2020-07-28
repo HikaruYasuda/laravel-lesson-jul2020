@@ -21,8 +21,20 @@
                     <input type="text" class="form-control" name="name" id="name">
                 </div>
                 <div class="form-group">
-                    <label for="memo">メモ</label>
-                    <textarea name="memo" id="memo" rows="4" class="form-control"></textarea>
+                    <label for="description">説明</label>
+                    <textarea name="description" id="description" rows="4" class="form-control"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="image">画像URL</label>
+                    <input type="text" class="form-control" name="image" id="image">
+                </div>
+                <div class="form-group">
+                    <label for="link">リンク</label>
+                    <input type="text" class="form-control" name="link" id="link">
+                </div>
+                <div class="form-group">
+                    <label for="rating">評価</label>
+                    <input type="number" class="form-control" name="rating" id="rating">
                 </div>
                 <button type="submit" class="btn btn-primary">送信</button>
             </form>
@@ -32,13 +44,32 @@
 <section class="container my-5">
     <h4><small>データ</small></h4>
     <div class="row">
+        <div class="col-sm-12">
+            <form method="get">
+                <div class="input-group mb-3">
+                    <input type="text" name="q" class="form-control" title value="{{ request('q') }}">
+                    <div class="input-group-append">
+                        <button class="btn btn-outline-secondary">検索</button>
+                    </div>
+                </div>
+            </form>
+        </div>
         @foreach($things as $thing)
             <div class="col-sm-6">
                 <div class="card">
                     <div class="card-body">
-                        <h5 class="card-title">{{ $thing['name'] }}</h5>
-                        <p class="card-text">{{ $thing['memo'] }}</p>
+                        <h5 class="card-title">{{ $thing->name }}</h5>
+                        <p class="card-text" style="white-space: pre-wrap">{{ $thing->description }}</p>
+                        @isset($thing->rating)
+                            <p class="card-text">評価： {{ $thing->rating }}</p>
+                        @endif
+                        @if($thing->link)
+                            <a href="{{ $thing->link }}" class="card-link">{{ $thing->name }}</a>
+                        @endif
                     </div>
+                    @if($thing->image)
+                        <img src="{{ $thing->image }}" alt class="bd-placeholder-img card-img-bottom" width="100%" height="180"/>
+                    @endif
                 </div>
             </div>
         @endforeach

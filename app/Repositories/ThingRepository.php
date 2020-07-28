@@ -2,7 +2,7 @@
 
 namespace App\Repositories;
 
-use Illuminate\Contracts\Filesystem\Filesystem;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Class ThingRepository
@@ -10,35 +10,43 @@ use Illuminate\Contracts\Filesystem\Filesystem;
  */
 class ThingRepository implements Contracts\ThingRepository
 {
-    /**
-     * @var \Illuminate\Contracts\Filesystem\Filesystem
-     */
-    private $filesystem;
-    private $threshold;
-
-    public function __construct(Filesystem $filesystem, $threshold)
+    public function getAll()
     {
-        $this->filesystem = $filesystem;
-        $this->threshold = $threshold;
+        return DB::table('things')->get();
     }
 
-    public function getAll(Filesystem $filesystem)
+    public function search(array $params)
     {
-        $things = collect();
-        foreach ($filesystem->files() as $file) {
-            if ($file === '.gitignore') {
-                continue;
+        $query = DB::table('things');
+
+        foreach (array_filter($params, 'filled') as $key => $value) {
+            switch ($key) {
+                case 'q':
+                    // todo: %_のエスケープをする
+                    $query->where(function ($q) use ($value) {
+                        $q->where('name', 'like', '%'.$value.'%')
+                            ->orWhere('description', 'like', '%'.$value.'%');
+                    });
+                    // where (name like ? or description like ?)
+                    break;
             }
-            $contents = $filesystem->get($file);
-            $things[] = json_decode($contents, true);
         }
-        return $things;
+
+        return $query->get();
     }
 
     public function create(array $data)
     {
-        $json = collect($data)->only('name', 'memo')->toJson(JSON_UNESCAPED_UNICODE);
+        $values = collect($data)->only([
+            'name',
+            'description',
+            'image',
+            'link',
+            'rating',
+        ]);
 
-        $this->filesystem->put("{$data['name']}.txt", $json);
+        $id = DB::table('things')->insertGetId($values->all());
+
+        return DB::table('things')->find($id);
     }
 }
