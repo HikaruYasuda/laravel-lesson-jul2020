@@ -17,3 +17,6 @@ Route::get('/', function () {
 
 Route::get('/', 'HomeController@index')->name('index');
 Route::post('/create', 'HomeController@store')->name('store');
+Route::get('/{thing}', 'HomeController@edit')->name('edit');
+Route::put('/{thing}', 'HomeController@update')->name('update');
+Route::delete('/{thing}', 'HomeController@destroy')->name('destroy');
