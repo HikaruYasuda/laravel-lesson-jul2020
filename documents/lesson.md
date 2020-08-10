@@ -362,13 +362,13 @@ public function store(Request $request)
 ```php
 // app/Providers/AppServiceProvider.php
 
-use App\Repositories\PortfolioRepository;
+use App\Repositories\ThingRepository;
 
 // 略
 
 public function register()
 {
-    $this->app->singleton(PortfolioRepository::class);
+    $this->app->singleton(ThingRepository::class);
 }
 ```
 
@@ -498,7 +498,7 @@ resolve(Filesystem::class)->put("{$data['name']}.txt", $json);
 $this->app->singleton('portfolios', PortfolioRepository::class);
 ```
 
-この場合、porfoliosとPortfolioRepositoryの両方でインスタンスが保存されてしまうので、片方をエイリアスにする。
+この場合、portfoliosとPortfolioRepositoryの両方でインスタンスが保存されてしまうので、片方をエイリアスにする。
 
 ```php
 //                解決に使う抽象クラス   紐付ける要求
@@ -507,5 +507,246 @@ $this->app->alias('portfolios', PortfolioRepository::class);
 
 ---
 
-抽象クラス`Illuminate\Contracts\Filesystem\Filesystem`が実オブジェクトに解決されるフローは、少し複雑ですがコンテナの仕組みを理解すれば追うことができます。
+抽象クラス`Illuminate\Contracts\Filesystem\Filesystem`が実オブジェクトに解決されるフローは、少し複雑だがコンテナの仕組みを理解すれば追える。
+
+---
+
+## Eloquentとクエリビルダ
+
+(1〜2日)
+
+---
+
+### Eloquentのおさらい
+
+- EloquentはLaravelの[O/R Mapper]である
+- Ruby on Railsなどでも使われる[ActiveRecord]というデザインパターンで、ラピッドプロトタイピングに向いている
+    - テーブルがクラスに対応している
+    - テーブルのレコード(行)がインスタンスに対応している
+    - レコードを取得するとインスタンスとして扱える。インスタンスを保存するとレコードも更新される
+- Eloquentでは1つのテーブル（またはビュー）を[Model]クラスに対応付けて実装する
+- EloquentはLaravelの[クエリビルダ]を使ってDBアクセスしている
+
+---
+
+> 補足：ORMとは
+> Object-Relational Mapper. O/R Mapper.
+> SQLを使うデータベース（RDBMS）は基本的に単純な値しか格納できず、データベースでは複雑なデータは表とその関連する表として保存する。
+> オブジェクト指向プログラミングで実装する際、オブジェクトをデータベースに格納可能な単純な値のグループに変換するか、プログラムをデータベースに合わせて単純な値だけを扱うようにしなければならない。O/Rマッピングはその前者の手法。
+
+---
+
+Eloquentの機能の大半はクエリビルダーを使っている
+
+→ Eloquentの前にクエリビルダーを理解しよう
+
+---
+
+### クエリビルダーについて
+
+- クエリ＝[データベース]への問い合わせのこと
+- つまり[SQL]を組み立てるツール
+- オブジェクト指向でデータベースアクセスできるPHP拡張モジュール[PDO]を使っている
+
+---
+
+> 補足：なぜPDOを使うか
+> PHPにはmysqlやmssqlなどにアクセスする拡張モジュールもあるが、PDOはそれらをほぼ同じインターフェースで扱えるように設計されている。
+> PDOはオブジェクト指向プログラミングできる。
+> PDOにはprepared statement（クエリテンプレートとパラメータを分けられる）の仕組みがある。速度面・安全面でメリットがある。
+
+---
+
+#### [実践]クエリビルダを使い、データベースでポートフォリオを管理しよう
+
+※ 通常はまずEloquentを使って素早く実装し、必要に応じてクエリビルダ化することが多いが、今回は機能を理解するために逆の手順で実装していこうと思います。
+
+---
+
+扱うデータは物・事なので
+前回までで作った PortfolioRepository を ThingRepository
+と変更してください。（※ ポートフォリオはThingが集まったもの）
+
+
+HomeController, index.blade.php, AppServiceProvider も変更してください :bow:
+
+---
+
+データベースにテーブルを作ります。
+
+```sh
+php artisan make:migration CreateThingsTable
+```
+
+```php
+public function up()
+{
+    Schema::create('things', function (Blueprint $table) {
+        $table->bigIncrements('id');
+        $table->string('name');
+        $table->text('description')->nullable();
+        $table->string('image')->nullable();
+        $table->string('link')->nullable();
+        $table->unsignedSmallInteger('rating')->nullable();
+        $table->json('extra')->nullable();
+        $table->timestamps();
+    });
+}
+```
+
+```sh
+php artisan migrate
+```
+
+---
+
+既存のThingRepositoryはコピーしてThingFileRepositoryにリネームしておき、DB接続版を実装していきます。
+
+※ Contracts\ThingRepositoryでFilesystemの引数は消しておく（AppServiceProviderのconcreteもなおしておく）
+FilesystemはStorageに変更。
+
+---
+
+```php
+// ThingRepository.php
+
+public function getAll()
+{
+    return DB::table('things')->get();
+}
+
+public function create(array $data)
+{
+    $values = collect($data)->only([
+        'name',
+        'description',
+        'image',
+        'link',
+        'rating',
+    ]);
+
+    $keys = $data['extra']['keys'] ?? [];
+    $attrs = $data['extra']['attrs'] ?? [];
+
+    $extra = collect($keys)->mapWithKeys(function ($key, $i) use ($data) {
+        $attr = $attrs[$i] ?? null;
+        if (filled($key) && filled($attr)) {
+            return [$key => $attr];
+        }
+        return [];
+    });
+
+    $values['extra'] = json_encode($extra, JSON_UNESCAPED_UNICODE);
+
+    $id = DB::table('things')->insertGetId($values->all());
+
+    return DB::table('things')->find($id);
+}
+```
+
+---
+
+項目が変更になったので `index.blade.php` を修正する.
+
+以下に注意.
+`$thing`が配列→オブジェクトに変わっている.
+取得した`$thing->extra`はJSON.
+
+---
+
+クエリビルダーは`DB::table('things')`で作り、
+get, find, first, insert, update, delete などのメソッドでクエリがビルド＆実行される。
+
+---
+
+#### 検索を追加しよう
+
+```html
+<div class="input-group mb-3">
+  <input type="text" name="q" class="form-control">
+  <div class="input-group-append">
+    <span class="input-group-text">検索</span>
+  </div>
+</div>
+```
+
+---
+
+Contracts\ThingRepositoryにsearchメソッドを追加
+
+```php
+// ThingRepository.php
+
+public function search(array $params)
+{
+    $query = DB::table('things');
+
+    foreach (array_filter($params, 'filled') as $key => $value) {
+        switch ($key) {
+            case 'q':
+                // todo: %_のエスケープをする
+                $query->where(function ($q) use ($value) {
+                    $q->where('name', 'like', '')
+                        ->orWhere('description', 'like', '');
+                });
+                break;
+        }
+    }
+
+    return $query->get();
+}
+
+```
+
+---
+
+whereに渡したクロージャの第一引数もクエリビルダー
+
+クエリビルダーにどんなメソッドがあるか確認してみよう。
+
+---
+
+#### Eloquentモデルでリポジトリを作ろう
+
+同じようにThingRepositoryをコピーしてThingQbRepositoryにリネーム。
+ThingRepositoryでEloquent実装をしてく。
+
+---
+
+Thingモデルを作る
+
+基本的にはDB::table()と同じように実装できることがわかる。
+
+---
+
+### Eloquentで拡張可能な機能（5.7時点）
+
+- キャスト(cast)
+- ミュテータ(mutator)
+- スコープ(scope)
+    - グローバルスコープ
+    - ローカルスコープ
+    - 論理削除(soft delete)
+- イベントフック
+    - bootメソッド
+- リレーション(relation)
+
+ひとつずつ見ていきます。
+
+---
+
+### キャスト
+
+`json`キャストすることでextraをjson_encode, json_decode不要になる。
+
+ratingも`int`キャストしよう。
+
+どんなキャストタイプがあるか確認してみよう。
+
+---
+
+### ミュテータ
+
+ratingを0.1ずつ採点できるようにする
+DB内では10倍で保存する
 

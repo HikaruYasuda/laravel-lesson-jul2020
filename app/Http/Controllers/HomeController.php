@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Thing;
 use App\Repositories\Contracts\ThingRepository;
 use Illuminate\Http\Request;
 
@@ -27,6 +28,25 @@ class HomeController extends Controller
     public function store(Request $request)
     {
         $this->repository->create($request->all());
+
+        return redirect()->route('index');
+    }
+
+    public function edit(Thing $thing)
+    {
+        return view('edit', compact('thing'));
+    }
+
+    public function update(Thing $thing, Request $request)
+    {
+        $this->repository->update($thing, $request->all());
+
+        return redirect()->route('index');
+    }
+
+    public function destroy(Thing $thing)
+    {
+        $this->repository->delete($thing);
 
         return redirect()->route('index');
     }

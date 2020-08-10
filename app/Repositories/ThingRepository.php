@@ -2,7 +2,7 @@
 
 namespace App\Repositories;
 
-use Illuminate\Support\Facades\DB;
+use App\Models\Thing;
 
 /**
  * Class ThingRepository
@@ -12,12 +12,12 @@ class ThingRepository implements Contracts\ThingRepository
 {
     public function getAll()
     {
-        return DB::table('things')->get();
+        return Thing::all();
     }
 
     public function search(array $params)
     {
-        $query = DB::table('things');
+        $query = Thing::query();
 
         foreach (array_filter($params, 'filled') as $key => $value) {
             switch ($key) {
@@ -37,16 +37,52 @@ class ThingRepository implements Contracts\ThingRepository
 
     public function create(array $data)
     {
-        $values = collect($data)->only([
-            'name',
-            'description',
-            'image',
-            'link',
-            'rating',
-        ]);
+        $thing = new Thing;
+        $thing->name = $data['name'] ?? null;
+        $thing->description = $data['description'] ?? null;
+        $thing->image = $data['image'] ?? null;
+        $thing->link = $data['link'] ?? null;
+        $thing->rating = $data['rating'] ?? null;
+        $thing->extra = $this->collectExtras($data);
 
-        $id = DB::table('things')->insertGetId($values->all());
+        $thing->save();
 
-        return DB::table('things')->find($id);
+        return $thing;
+    }
+
+    public function update(Thing $thing, array $data)
+    {
+        $thing->name = $data['name'] ?? null;
+        $thing->description = $data['description'] ?? null;
+        $thing->image = $data['image'] ?? null;
+        $thing->link = $data['link'] ?? null;
+        $thing->rating = $data['rating'] ?? null;
+        $thing->extra = $this->collectExtras($data);
+
+        $thing->save();
+
+        return $thing;
+    }
+
+    public function delete(Thing $thing)
+    {
+        return $thing->delete();
+    }
+
+    private function collectExtras($data)
+    {
+        $keys = $data['extra']['keys'] ?? [];
+        $attrs = $data['extra']['attrs'] ?? [];
+
+        $extras = [];
+
+        foreach ($keys as $i => $key) {
+            $attr = $attrs[$i] ?? null;
+            if (filled($key) && filled($attr)) {
+                $extras[$key] = $attr;
+            }
+        }
+
+        return $extras;
     }
 }
