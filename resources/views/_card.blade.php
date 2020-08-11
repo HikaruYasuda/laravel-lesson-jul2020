@@ -6,6 +6,7 @@
                 <a href="{{ route('edit', $thing) }}">編集</a>
             </small>
             <h5 class="card-title">{{ $thing->name }}</h5>
+            <p class="card-text text-muted"><small>{{ $thing->name_kana }}</small></p>
             <p class="card-text" style="white-space: pre-wrap">{{ $thing->description }}</p>
             @isset($thing->rating)
                 <p class="card-text">評価： {{ $thing->rating }}</p>

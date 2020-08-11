@@ -31,7 +31,8 @@ $extra = (old('keys') || old('attrs')) ? array_combine(old('keys', []), old('att
         <label class="col-sm-3 col-form-label" for="rating">評価</label>
         <div class="col-sm-9 px-0">
             <input type="number" class="form-control w-auto" name="rating" id="rating"
-                   value="{{ old('rating', $thing->rating ?? null) }}">
+                   min="0" max="5" step="0.5"
+                   value="{{ old('rating', $thing->rating ?? 0) }}">
         </div>
     </div>
     <fieldset class="form-group">
