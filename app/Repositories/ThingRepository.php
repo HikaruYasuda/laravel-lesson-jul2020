@@ -12,12 +12,12 @@ class ThingRepository implements Contracts\ThingRepository
 {
     public function getAll()
     {
-        return Thing::all();
+        return Thing::rating(20)->get();
     }
 
     public function search(array $params)
     {
-        $query = Thing::query();
+        $query = Thing::rating(20);
 
         foreach (array_filter($params, 'filled') as $key => $value) {
             switch ($key) {

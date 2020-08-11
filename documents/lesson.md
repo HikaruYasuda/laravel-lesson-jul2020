@@ -715,11 +715,22 @@ ThingRepositoryでEloquent実装をしてく。
 
 Thingモデルを作る
 
-基本的にはDB::table()と同じように実装できることがわかる。
+→ 基本的にはDB::table()と同じように実装できることがわかる。
 
 ---
 
-### Eloquentで拡張可能な機能（5.7時点）
+#### Q. クエリビルダとEloquentはどう使い分ける？
+
+Eloquentは「モデル」が中心。
+抽象的な定義をしておくだけで複雑なwhereやEagerLoadingをしてくれるので大抵の場合コード量が少なく済む。
+モデルの定義とデータ利用の実装を分離できるので、分業しやすかったり変更しやすかったりする。
+
+クエリビルダはSQLを作りやすくするだけ（直接SQLを書くよりは断然いい）。
+１つのテーブルに捉われることなくユースケースに応じてjoin-selectしたりできる。
+
+---
+
+### Eloquentで拡張可能な機能（5.8時点）
 
 - キャスト(cast)
 - ミュテータ(mutator)
@@ -735,18 +746,267 @@ Thingモデルを作る
 
 ---
 
-### キャスト
+### キャスト(cast)
 
-`json`キャストすることでextraをjson_encode, json_decode不要になる。
+- DBから取得したデータは文字列、整数、実数としてモデルの属性に格納される※
+- 論理値や日付などにキャストしたい場合は`$casts`プロパティでデータタイプを指定する
 
-ratingも`int`キャストしよう。
+`Thing#extra`属性を`json`キャストするとjson_encode, json_decodeが不要になる。
 
-どんなキャストタイプがあるか確認してみよう。
+
+> ※PDO(mysql)でカラムの型に合わせて整数・実数としてfetchされるのは、mysqlのドライバとしてmysqlndを使っていて、`PDO::ATTR_EMULATE_PREPARE` `PDO::ATTR_STRINGIFY_FETCHES`が共にfalseの場合に限る。
 
 ---
 
-### ミュテータ
+#### どんなキャストタイプがあるか確認しよう
 
-ratingを0.1ずつ採点できるようにする
-DB内では10倍で保存する
+@see `Illuminate\Database\Eloquent\Concerns\HasAttributes::castAttribute()`
+
+|キャスト|型|
+|---|---|
+|int,integer|整数|
+|real,float,double|浮動小数点数|
+|decimal|実数の文字列|
+|string|文字列|
+|bool,boolean|論理値|
+|object|オブジェクト|
+|array,json|配列|
+|collection|Collectionオブジェクト|
+|date|時刻を除いたCarbonオブジェクト|
+|datetime|Carbonオブジェクト|
+|timestamp|UNIXタイムスタンプ|
+
+---
+
+#### キャストのタイミングは属性の取得時
+
+- `echo $thing->extra` のように属性にアクセスした時にキャストされる
+- `$thing->toArray()` `$thing->toJson()` のように配列化やJSON化する時は、キャストした上で日付が文字列フォーマットされる
+    - フォーマット形式は$castsで`date:y-M-d`と指定できる
+
+---
+
+Laravel 7ではより柔軟にキャストできるようになっている
+
+https://laravel.com/docs/7.x/eloquent-mutators#custom-casts
+
+---
+
+### アクセサとミュテータ
+
+#### アクセサ
+
+- 属性取得時のデータタイプ変換をメソッドで定義する
+- 存在しない属性へのアクセスも定義できる
+    - toArrayやtoJsonに含める場合は`$appends`プロパティに追加する
+- 存在する属性の場合、オリジナルの値が引数に渡される
+
+**メソッド名**
+
+`get{属性名のパスカルケース}Attribute($value)`
+例：属性名が`first_name` → `getFirstNameAttribute($value)`
+
+---
+
+#### ミュテータ
+
+- アクセサの逆で、属性に値をセットする時のデータタイプ変換をメソッドで定義する
+- 存在しない属性へのデータセットを実属性へ渡すことができる
+- `$this->attributes[実属性のキー] = ?`で代入する
+
+**メソッド名**
+
+`set{属性名のパスカルケース}Attribute($value)`
+例：属性名が`first_name` → `setFirstNameAttribute($value)`
+
+---
+
+##### 評価を0.5ずつ採点できるようにしよう
+
+DBがinteger型なのでそのままでは保存できない。
+10倍した値をDBに保存し、0.1倍した値を表示すればよい。
+
+> 浮動小数点数の演算はずれることがあるので、この方法で保存した方がよい場合もある
+https://www.php.net/manual/ja/language.types.float.php
+
+---
+
+### クエリスコープ
+
+スコープは、クエリ結果に制約を追加する機能
+
+- どんな時に使うか
+    - 例: `active`カラムの値が1のレコードのみ
+    - 例: `published_at`カラムの値が現在時刻以降のレコードのみ
+    - 例: ログインユーザの所有するレコードのみ
+- whereだけでなくorderByやaddSelectも付けられる
+- グローバルスコープとローカルスコープがある
+
+---
+
+#### グローバルスコープ
+
+モデルクラスに（静的）追加するスコープ。
+そのモデルで発行するクエリすべてに制約が適用される（外すこともできる）。
+
+クラスで定義する方法とクロージャで定義する方法がある。
+
+---
+
+##### クラスとして定義する場合
+
+```php
+// スコープクラス
+use Illuminate\Database\Eloquent\Scope;
+
+class AuthUserScope implements Scope
+{
+    private $user;
+    public function __construct($user)
+    {
+        $this->user = $user;
+    }
+
+    /**
+     * @param \Illuminate\Database\Eloquent\Builder $builder
+     * @param \Illuminate\Database\Eloquent\Model $model
+     */
+    public function apply(Builder $builder, Model $model)
+    {
+        $builder->where('user_id', '=', $this->user->id);
+    }
+}
+
+// モデル側
+public static function boot() {
+    parent::boot();
+
+    static::addGlobalScope(new AuthUserScope(auth()->user()));
+}
+```
+
+---
+
+##### クロージャとして定義する場合
+```php
+// モデル
+public static function boot() {
+    parent::boot();
+
+    static::addGlobalScope('authUser', function (Builder $builder) {
+        $builder->where('user_id', '=', auth()->user()->id);
+    });
+}
+```
+
+---
+
+##### グローバルスコープの削除
+
+Eloquentクエリの途中、または新しくEloquentクエリを作る時に、特定のスコープを除外したクエリを作ることができる。
+
+```php
+// クラスの場合
+Thing::withoutGlobalScope(AuthUserScope::class)->get();
+// クロージャの場合
+Thing::withoutGlobalScope('authUser')->get();
+```
+
+---
+
+##### SoftDeletes
+
+Laravelの`SoftDeletes`はグローバルスコープを使って論理削除を実現している。
+
+どのように実装されているか見てみよう。
+
+---
+
+#### ローカルスコープ
+
+インスタンスメソッドとして用意するスコープ。
+好きなタイミングで呼び出して制約を適用できる。
+
+**メソッド名**
+`scope{スコープ名のパスカルケース}($query)`
+
+**呼び出す時は**
+
+---
+
+```php
+/**
+ * 評価30以上に限定するスコープ
+ *
+ * @param  \Illuminate\Database\Eloquent\Builder  $query
+ * @return \Illuminate\Database\Eloquent\Builder
+ */
+public function scopeRating($query)
+{
+    return $query->where('rating', '>=' 30);
+}
+```
+
+適用する時
+```php
+Thing::rating()->get()
+```
+
+---
+
+動的に条件を変更することもできる
+
+```php
+/**
+ * 評価30以上に限定するスコープ
+ *
+ * @param  \Illuminate\Database\Eloquent\Builder  $query
+ * @param int $min
+ * @return \Illuminate\Database\Eloquent\Builder
+ */
+public function scopeRating($query, $min = 30)
+{
+    return $query->where('rating', '>=' $min);
+}
+```
+
+適用する時
+```php
+Thing::rating(40)->get()
+```
+
+---
+
+### イベントフック
+
+モデルのライフサイクルに応じてフックが用意されています
+
+- boot モデルクラスの初期化
+- creating, created 新規追加
+- updating, updated 更新
+- saving, saved 追加or更新
+- deleting, deleted 削除
+- restoring, restored 論理削除からの復帰
+- retrieved DBからの取得
+
+---
+
+次の方法で指定できる
+
+- bootメソッドで各イベント時の処理をクロージャで指定する
+- `$dispatchesEvents`でイベントクラスを指定する
+
+```php
+protected $dispatchesEvents = [
+    'saved' => ThingSaved::class,
+    'deleted' => ThingDeleted::class,
+];
+```
+
+変更時にログを記録するように変更してみよう
+
+---
+
+### リレーション
+
 
