@@ -19,6 +19,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class Like extends Model
 {
+    protected $fillable = ['thing_id', 'ip'];
+
     protected $dispatchesEvents = [
         'created' => LikeCreated::class,
     ];

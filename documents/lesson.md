@@ -1010,9 +1010,7 @@ Laravelのイベント機能はF/Wのいろいろなところで使われてい�
 
 ---
 
-まずは簡単なフックの追加方法
-
-bootメソッドで各イベント時の処理をクロージャで指定する
+#### bootメソッドで各イベント時の処理をクロージャで指定する
 
 ```php
 // モデルクラス
@@ -1027,31 +1025,36 @@ public static function boot() {
 
 ---
 
-#### ポートフォリオを公開して「いいね」されたら通知受け取る
+###### ポートフォリオを公開して「いいね」されたら通知受け取る機能を追加しよう
 
-まずは公開するために認証を追加する
+1. まずは公開するために認証機能を追加
 
 ```
 $ php artisan make:auth
 ```
 
-下記を適宜修正する
+2. 下記を適宜修正する
 - routes/web.php
     - `Auth::routes(['register' => false, 'reset' => false, 'verify' => false]);`
     - 編集のルートをauth middlewareで囲む
 - `Middleware/RedirectIfAuthenticated`, `HomeController`, `LoginController`
-- `index.blade.php`, `_card.blade.php` 編集とかできないように
+- `index.blade.php`, `_card.blade.php` ログイン中のみ編集フォームを表示する
 
 ---
 
-ユーザ追加
+3. 管理者ユーザをtinkerで追加
+
 ```php
 $ php artisan tinker
 > User::create(['name'=>'yasuda','email'=>'yasuda.hikaru@gmail.com','password'=>bcrypt('123')])
 ```
 
+---
+
+4. ログイン/ログアウトボタン追加
+
 ```html
-// layout.blade.php に追加
+// layout.blade.php
 <header>
     <div class="navbar navbar-dark bg-dark shadow-sm">
         <div class="container d-flex justify-content-between">
@@ -1080,7 +1083,7 @@ $ php artisan tinker
 
 ---
 
-Likeテーブルを追加
+5. いいね用テーブルとリレーションを追加
 
 ```
 $ php artisan make:migration CreateLikesTable
@@ -1096,80 +1099,251 @@ Schema::create('likes', function (Blueprint $table) {
 ```
 
 ```php
-    // Thing.php
+// app/Models/Thing.php
 
-    public function likes()
-    {
-        return $this->hasMany(Like::class);
-    }
-    
-    public function liked()
-    {
-        return $this->likes()->where('ip', '=', request()->ip())->exists();
-    }
-```
+public function likes(): HasMany
+{
+    return $this->hasMany(Like::class);
+}
 
----
-
-「いいね」ボタンを追加する
-
-```html
-<form action="{{ route('like', $thing) }}" method="post">
-    @csrf
-    <button class="btn" data-like="{{ $thing->id }}">
-        {{ $thing->liked }} いいね
-    </button>
-</form>
-```
-
----
-
-今回は時間の都合上、通知ではなくログ出力をする
-
-```php
-Like.php
-
-public static boot() {
-
+public function liked(): bool
+{
+    return $this->likes()->where('ip', '=', request()->ip())->exists();
 }
 ```
 
 ---
 
-メールを追加する
+6. コントローラを追加
 
-[mailtrap.io](https://mailtrap.io) > Demo index > Laravel用設定を.envにコピペ
+※ firstOrCreateで属性セットするのでfillable忘れずに
+
+```php
+// app/Controllers/LikeController.php
+class LikeController extends Controller
+{
+    public function store(Thing $thing, Request $request)
+    {
+        $like = Like::firstOrCreate([
+            'thing_id' => $thing->id,
+            'ip' => $request->ip(),
+        ]);
+
+        // × よくある実装だとここに通知を実装したくなるが、しない
+
+        return redirect()->route('index');
+    }
+
+    public function destroy(Thing $thing, Request $request)
+    {
+        Like::where('thing_id', '=', $thing->id)
+            ->where('ip', '=', $request->ip())
+            ->delete();
+
+        return redirect()->route('index');
+    }
+}
+```
+
+---
+
+7. ルートと「いいね」ボタンを追加
+
+```php
+// routes/web.php
+Route::middleware('guest')->group(function() {
+    Route::post('/{thing}/likes', 'LikeController@store')->name('like.store');
+    Route::delete('/{thing}/likes', 'LikeController@destroy')->name('like.destroy');
+});
+```
+
+```html
+<!-- // _card.blade.php -->
+@if($thing->liked)
+    <form action="{{ route('like.destroy', $thing) }}" method="post">
+        @method('delete')
+        @csrf
+        <button class="btn btn-info btn-sm" data-like="{{ $thing->id }}">
+            いいね <[ {{ $thing->likesCount }} ]
+        </button>
+    </form>
+@else
+    <form action="{{ route('like.store', $thing) }}" method="post">
+        @csrf
+        <button class="btn btn-outline-secondary btn-sm" data-like="{{ $thing->id }}">
+            いいね <[ {{ $thing->likesCount }} ]
+        </button>
+    </form>
+@endif
+```
+
+---
+
+9. Likeモデルにフックを追加する
+（今回は時間の都合上、通知ではなくログ出力をする.
+　通常はメール、ブロードキャスト、WebPushなどを使って通知する）
+
+```php
+// app/Models/Like.php
+
+public static function boot() {
+    parent::boot();
+
+    static::creating(function (Model $model) {
+        logger()->info(
+            "Like added. thing:{$model->thing->name}({$model->thing_id}) ip:{$model->ip}"
+        );
+    });
+}
+```
 
 ---
 
 #### イベントクラスで登録
 
-- `$dispatchesEvents`でイベントクラスを指定する
+モデルの`$dispatchesEvents`プロパティへ各モデルイベントに対応するイベントクラスを指定する
+
+---
+
+###### 変更時にログを記録するように変更してみよう
+
+1. イベントを作る
+
+```sh
+$ php artisan make:event LikeCreated
+```
 
 ```php
-protected $dispatchesEvents = [
-    'created' => Created::class,
-    'deleted' => ThingDeleted::class,
+// app/Events/LikeCreated
+class LikeCreated
+{
+    /**
+     * @var \App\Models\Like
+     */
+    public $like;
+
+    public function __construct(Like $like)
+    {
+        $this->like = $like;
+    }
+}
+```
+
+---
+
+2. イベントリスナーを作って登録する
+
+```sh
+php artisan make:listener SendLikeNotification --event=LikeCreated
+```
+
+```php
+// app/Listeners/SendLikeNotification.php
+class SendLikeNotification
+{
+    public function handle(LikeCreated $event)
+    {
+        logger()->info(
+            "Like added. thing:{$event->like->thing->name}({$event->like->thing_id}) ip:{$event->like->ip}"
+        );
+    }
+}
+```
+
+```php
+// app/Providers/EventServiceProvider.php
+protected $listen = [
+    LikeCreated::class => [
+        SendLikeNotification::class,
+    ],
 ];
 ```
 
-変更時にログを記録するように変更してみよう
+---
+
+3. bootメソッドのクロージャフックをイベント形式に変更する
+
+```php
+// app/Models/Like.php
+protected $dispatchesEvents = [
+    'created' => LikeCreated::class,
+];
+```
+
+ここまでは同じ動作になる.
+これにログ追加の副作用を追加したいが、`SendLikeNotification(いいね通知送信)`とは別の副作用なので分けて実装したい.
+↓
+
+別のリスナーを作って同じイベントに紐づければいい
+
+```sh
+php artisan make:listener LoggingLikeCreated --event=LikeCreated
+```
+
+---
+
+```php
+// app/Listeners/LoggingLikeCreated.php
+class LoggingLikeCreated
+{
+    public function handle($event)
+    {
+        if ($event instanceof LikeCreated) {
+            logger()->info('いいねされた');
+        }
+        //// $eventの型でどのイベントなのか判別できる
+        // elseif ($event instanceof LikeDestroyed) {
+        //    logger()->info('いいねが消された');
+        //}
+    }
+}
+```
+
+```php
+// app/Providers/EventServiceProvider.php
+protected $listen = [
+    LikeCreated::class => [
+        SendLikeNotification::class,
+        LoggingLikeCreated::class,
+    ],
+];
+```
 
 ---
 
 #### オブザーバ
 
-イベントを一括で受け付けるクラスを登録できる
+イベントをまとめて監視するクラス（オブザーバ=観察者）をモデルに登録できる
+
+1. オブザーバクラスを作る
 
 ```sh
-php artisan make:observer UserObserver --model=User
+php artisan make:observer LikeObserver --model=Like
 ```
 
-`AppServiceProvider::boot()`で登録する
+2. AppServiceProviderのboot()メソッドで紐付けを定義する
 
 ```php
-User::observe(UserObserver::class);
+// app/Providers/AppServiceProvider.php
+public function boot()
+{
+    Like::observe(LikeObserver::class);
+}
 ```
+
+---
+
+#### それぞれのフックを比較してみる
+
+- bootメソッドでクロージャ
+    - メリット：モデルを見ればどんな副作用があるか一目瞭然
+    - デメリット：ファットモデル. モデルの実装と競合する
+- イベントクラス
+    - メリット：イベント-リスナーパターンに集約できる. 副作用に応じてリスナーを分けられる. モデルとイベントの実装者は副作用の中身を気にしなくていい
+    - デメリット：副作用の中身だけでなく有無もモデルから隠されていて追うのが手間
+- オブザーバ
+    - メリット：１つのモデルに対する副作用が集約されている
+    - デメリット：副作用が多い時オブザーバクラスが肥大化する
 
 ---
 

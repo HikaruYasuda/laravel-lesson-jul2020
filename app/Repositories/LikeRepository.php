@@ -14,28 +14,16 @@ class LikeRepository implements LikeRepositoryContract
 {
     public function store(Thing $thing, string $ip): Like
     {
-        $like = Like::where('thing_id', '=', $thing->id)->where('ip', '=', $ip)->first();
-        if ($like) {
-            return $like;
-        }
-
-        $like = new Like();
-        $like->thing_id = $thing->id;
-        $like->ip = $ip;
-        $like->save();
-
-        // メールで通知 x
-
-        return $like;
+        return Like::firstOrCreate([
+            'thing_id' => $thing->id,
+            'ip' => $ip,
+        ]);
     }
 
-    public function destroy(Thing $thing, string $ip): bool
+    public function destroy(Thing $thing, string $ip)
     {
-        /** @var Like $like */
-        $like = Like::where('thing_id', '=', $thing->id)->where('ip', '=', $ip)->first();
-        if ($like) {
-            return $like->delete() ?? false;
-        }
-        return false;
+        Like::where('thing_id', '=', $thing->id)
+            ->where('ip', '=', $ip)
+            ->delete();
     }
 }
