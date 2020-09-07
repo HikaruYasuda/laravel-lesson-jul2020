@@ -2,9 +2,30 @@
 <div class="col-sm-6 mb-5">
     <div class="card">
         <div class="card-body">
-            <small class="float-right">
-                <a href="{{ route('edit', $thing) }}">編集</a>
-            </small>
+            @auth
+                <small class="float-right">
+                    <a href="{{ route('edit', $thing) }}">編集</a>
+                </small>
+            @else
+                <div class="float-right">
+                    @if($thing->liked)
+                        <form action="{{ route('like.destroy', $thing) }}" method="post">
+                            @method('delete')
+                            @csrf
+                            <button class="btn btn-info btn-sm" data-like="{{ $thing->id }}">
+                                いいね <[ {{ $thing->likesCount }} ]
+                            </button>
+                        </form>
+                    @else
+                        <form action="{{ route('like.store', $thing) }}" method="post">
+                            @csrf
+                            <button class="btn btn-outline-secondary btn-sm" data-like="{{ $thing->id }}">
+                                いいね <[ {{ $thing->likesCount }} ]
+                            </button>
+                        </form>
+                    @endif
+                </div>
+            @endauth
             <h5 class="card-title">{{ $thing->name }}</h5>
             <p class="card-text text-muted"><small>{{ $thing->name_kana }}</small></p>
             <p class="card-text" style="white-space: pre-wrap">{{ $thing->description }}</p>

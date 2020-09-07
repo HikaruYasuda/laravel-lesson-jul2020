@@ -979,31 +979,197 @@ Thing::rating(40)->get()
 
 ### イベントフック
 
-モデルのライフサイクルに応じてフックが用意されています
+モデルのライフサイクルに応じてフックが用意されている
 
-- boot モデルクラスの初期化
-- creating, created 新規追加
-- updating, updated 更新
-- saving, saved 追加or更新
-- deleting, deleted 削除
-- restoring, restored 論理削除からの復帰
-- retrieved DBからの取得
+- `retrieved` DBからの取得
+- `creating`(直前), `created`(直後) 新規追加
+- `updating`(直前), `updated`(直後) 更新
+- `saving`(直前), `saved`(直後) 追加or更新
+- `deleting`(直前), `deleted`(直後) 削除
+- `restoring`, `restored` 論理削除からの復帰
+- `replicating` モデルのコピー
+
+`HasEvents::getObservableEvents()`に利用可能なフックが定義されている
 
 ---
 
-次の方法で指定できる
+#### Eloquentのフックはイベントでできている
 
-- bootメソッドで各イベント時の処理をクロージャで指定する
+_イベント_
+→ 発生するいろいろな事象・アクション
+→ LaravelではEventDispatcherがイベントを管理している
+
+Laravelのイベント機能はF/Wのいろいろなところで使われている
+
+- 認証周り、DB操作、メールや通知、Laravel自体のライフサイクル、など
+
+> モデルクラスの`boot`も初期化時に1度だけ呼ばれるフックとして使えるが、イベントではない。
+
+**発生した場所に関係なく、どこからでも発生したアクションを監視して処理できる。**
+→ フロントエンド慣れている人はイベントの使い所わかりやすいと思う（onclickとかonchangeとか）
+
+---
+
+まずは簡単なフックの追加方法
+
+bootメソッドで各イベント時の処理をクロージャで指定する
+
+```php
+// モデルクラス
+public static function boot() {
+    parent::boot();
+
+    static::creating(function (Model $model) {
+        // モデルを保存する直前にする処理
+    });
+}
+```
+
+---
+
+#### ポートフォリオを公開して「いいね」されたら通知受け取る
+
+まずは公開するために認証を追加する
+
+```
+$ php artisan make:auth
+```
+
+下記を適宜修正する
+- routes/web.php
+    - `Auth::routes(['register' => false, 'reset' => false, 'verify' => false]);`
+    - 編集のルートをauth middlewareで囲む
+- `Middleware/RedirectIfAuthenticated`, `HomeController`, `LoginController`
+- `index.blade.php`, `_card.blade.php` 編集とかできないように
+
+---
+
+ユーザ追加
+```php
+$ php artisan tinker
+> User::create(['name'=>'yasuda','email'=>'yasuda.hikaru@gmail.com','password'=>bcrypt('123')])
+```
+
+```html
+// layout.blade.php に追加
+<header>
+    <div class="navbar navbar-dark bg-dark shadow-sm">
+        <div class="container d-flex justify-content-between">
+            <a href="{{ route('index') }}" class="navbar-brand d-flex align-items-center">
+                <strong>観たもの・聴いたもの・読んだもの・遊んだもの</strong>
+            </a>
+        </div>
+    </div>
+</header>
+<main class="bg-light">
+    @yield('content')
+</main>
+<footer class="footer">
+    <div class="container">
+        <p class="float-right">
+            @auth
+                <button form="logout" class="btn btn-link text-muted">ログアウト</button>
+                <form id="logout" action="{{ route('logout') }}" method="post"> @csrf </form>
+            @else
+                <a href="{{ route('login') }}" class="btn btn-link text-muted">管理者ログイン</a>
+            @endauth
+        </p>
+    </div>
+</footer>
+```
+
+---
+
+Likeテーブルを追加
+
+```
+$ php artisan make:migration CreateLikesTable
+```
+
+```php
+Schema::create('likes', function (Blueprint $table) {
+    $table->bigIncrements('id');
+    $table->bigInteger('thing_id');
+    $table->ipAddress('ip');
+    $table->timestamps();
+});
+```
+
+```php
+    // Thing.php
+
+    public function likes()
+    {
+        return $this->hasMany(Like::class);
+    }
+    
+    public function liked()
+    {
+        return $this->likes()->where('ip', '=', request()->ip())->exists();
+    }
+```
+
+---
+
+「いいね」ボタンを追加する
+
+```html
+<form action="{{ route('like', $thing) }}" method="post">
+    @csrf
+    <button class="btn" data-like="{{ $thing->id }}">
+        {{ $thing->liked }} いいね
+    </button>
+</form>
+```
+
+---
+
+今回は時間の都合上、通知ではなくログ出力をする
+
+```php
+Like.php
+
+public static boot() {
+
+}
+```
+
+---
+
+メールを追加する
+
+[mailtrap.io](https://mailtrap.io) > Demo index > Laravel用設定を.envにコピペ
+
+---
+
+#### イベントクラスで登録
+
 - `$dispatchesEvents`でイベントクラスを指定する
 
 ```php
 protected $dispatchesEvents = [
-    'saved' => ThingSaved::class,
+    'created' => Created::class,
     'deleted' => ThingDeleted::class,
 ];
 ```
 
 変更時にログを記録するように変更してみよう
+
+---
+
+#### オブザーバ
+
+イベントを一括で受け付けるクラスを登録できる
+
+```sh
+php artisan make:observer UserObserver --model=User
+```
+
+`AppServiceProvider::boot()`で登録する
+
+```php
+User::observe(UserObserver::class);
+```
 
 ---
 

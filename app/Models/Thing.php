@@ -5,7 +5,9 @@ namespace App\Models;
 use App\Models\Scopes\AuthUserScope;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * Class Thing
@@ -21,6 +23,9 @@ use Illuminate\Database\Eloquent\Model;
  * @property Carbon $created_at
  * @property Carbon $updated_at
  * @method static static|Builder rating(int $min) 評価30以上に限定するスコープ
+ * @property-read Like[]|EloquentCollection $likes いいねコレクション
+ * @property-read bool $liked 現在の利用者がいいねしている
+ * @property-read int $likesCount いいねされている数
  */
 class Thing extends Model
 {
@@ -57,5 +62,23 @@ class Thing extends Model
     public function getNameKanaAttribute()
     {
         return mb_convert_kana($this->name, 'c');
+    }
+
+    /** [relation] {@see \App\Models\Thing::$likes} */
+    public function likes(): HasMany
+    {
+        return $this->hasMany(Like::class);
+    }
+
+    /** [accessor] {@see \App\Models\Thing::$liked} */
+    public function getLikedAttribute()
+    {
+        return $this->likes()->where('ip', '=', request()->ip())->exists();
+    }
+
+    /** [accessor] {@see \App\Models\Thing::$likesCount} */
+    public function getLikesCountAttribute()
+    {
+        return $this->likes()->count();
     }
 }

@@ -3,6 +3,7 @@
 @section('title', 'ポートフォリオ')
 
 @section('content')
+    @auth
     <section class="container my-5">
         <div class="card">
             <div class="card-header">
@@ -23,6 +24,8 @@
             </div>
         </div>
     </section>
+    @endauth
+
     <section class="container my-5">
         <div class="row">
             <div class="col-sm-12 mb-4">

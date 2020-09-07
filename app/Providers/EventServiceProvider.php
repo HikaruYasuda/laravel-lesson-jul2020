@@ -2,6 +2,9 @@
 
 namespace App\Providers;
 
+use App\Events\LikeCreated;
+use App\Listeners\LoggingLikeCreated;
+use App\Listeners\SendLikeNotification;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
@@ -17,6 +20,10 @@ class EventServiceProvider extends ServiceProvider
     protected $listen = [
         Registered::class => [
             SendEmailVerificationNotification::class,
+        ],
+        LikeCreated::class => [
+            SendLikeNotification::class,
+            LoggingLikeCreated::class,
         ],
     ];
 
