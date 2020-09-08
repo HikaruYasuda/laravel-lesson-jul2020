@@ -1,12 +1,21 @@
 @php
 /** @var \App\Models\Thing|null $thing */
 $extra = (old('keys') || old('attrs')) ? array_combine(old('keys', []), old('attrs', [])) : $thing->extra ?? [];
+$tags = \App\Models\Tag::all();
 @endphp
 
 <form method="post" action="{{ $action }}">
     @csrf
     @method($method)
 
+    <div class="form-group row">
+        <label class="col-sm-3 col-form-label" for="tag_ids">タグ</label>
+        <select class="form-control col-sm-9" name="tag_ids[]" id="tag_ids" multiple size="4">
+            @foreach($tags as $tag)
+                <option value="{{ $tag->id }}" {{ in_array($tag->id, old('tag_ids', isset($thing) ? $thing->tags->pluck('id')->all() : [])) ? 'selected' : '' }}>{{ $tag->name }}</option>
+            @endforeach
+        </select>
+    </div>
     <div class="form-group row">
         <label class="col-sm-3 col-form-label" for="name">名前</label>
         <input type="text" class="form-control col-sm-9" name="name" id="name"

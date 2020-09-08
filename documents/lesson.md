@@ -1349,4 +1349,412 @@ public function boot()
 
 ### リレーション
 
+おさらい：リレーションの種類
+
+- 1対1
+    - HasOne
+    - BelongsTo
+- 1対N
+    - HasMany
+    - BelongsTo
+- N対N：
+    - BelongsToMany
+- through系
+- morph系
+
+---
+
+#### リレーションの読み込み
+
+リレーション読み込みのメカニズム、説明できますか？
+
+- 階層構造のモデルを読み込む時も、JOINせずにモデル単位で読み込む
+- EagerLoadはどこで使うのが適切か
+- そもそもリレーションクラスってなに？
+
+---
+
+##### なぜEloquentのリレーションはJOINで読み込まないのか
+
+1対1やN対1（HasOneやBelongsTo）の場合はJOINで一度に読み込んだ方がクエリ数は少なくなるはず🤔
+
+- ページネーション時の件数
+    - 1対NやN対Nの場合、元データを10件取得したくて`limit 10`したはずが、JOIN先のデータが多くて元データが10件未満しか取れないケースが発生する
+- 不要なフェッチデータ
+    - N対1の場合、元データが100件あってリレーション先がすべて同じ場合、リレーション先のデータが100倍にコピーされて通信される
+
+JOINを使って読み込み処理をチューニングする場合はこの辺を考慮しておこう
+
+---
+
+##### EagerLoad（イーガーロード）
+
+リレーションで定義されたモデル（またはモデルのコレクション）は、リレーションメソッドと同じ名前の動的プロパティでアクセスできる。
+
+動的プロパティは、アクセスされた時にSQLが実行されるので必要最低限のクエリ数で済む場合もあるが、逆にクエリ数が爆発的に多くなる場合もある。これを「**N+1問題**」という。
+
+```html
+<!-- N+1の例：ユーザが50人いたらSQLが51回実行される
+　   普通に実行できてしまうのでログを見るまで誰も気付かない怪談話😱 -->
+<?php $users = User::all() ?><!-- select * from users -->
+@foreach($users as $user)
+    {{ $user->name }} : {{ $user->group->name }}
+    <!-- select * from groups where id = {user->group_id} -->
+@endforeach
+```
+
+EagerLoadとは、リレーションを前もってロードしておくこと。
+
+```
+EagerLoading(熱心に読み込む) → 必要になる前に読み込む → 先読み機能
+```
+
+---
+
+##### EagerLoadのタイミング
+
+- モデルの`$with`プロパティで指定
+    - すべてのクエリに適用されてしまう→必ずセットで成立するリレーションはいいかも
+- Eloquentビルダーで`get()`する前に`with()`で指定
+    - リポジトリパターンの場合、何を使うか予めリポジトリに教える必要がある
+    - データの読み込みをリポジトリ内で完結させることができる
+    - スコープでEagerLoadする場合もこれ
+- 読み込んだあとに`load()`,`loadMissing()`で指定
+    - オンデマンド、かつN+1対策
+- ~~上記のどれもやらずにプロパティアクセス~~
+    - これはEagerLoadじゃない🙅‍♀️
+
+おまけ：
+- リレーションの件数だけを取得する`withCount()`,`loadCount()`もある
+
+---
+
+###### 「いいね」してるか判定とカウントをEagerLoadしよう
+
+今の状態だと、件数分+1回のSQLが実行されてしまう
+
+**実行されているSQLを確認**
+
+`Events\QueryExecuted`というイベントが発行されるのでリスナーを登録して
+
+```php
+// app/Providers/EventServiceProvider.php
+protected $listen = [
+    QueryExecuted::class => [
+        'App\\Listeners\\QueryLogTracker',
+    ],
+];
+```
+
+クラスを生成
+```sh
+php artisan event:generate
+```
+
+---
+
+クエリをエミュレートする処理追加（秘伝のタレ）
+
+```php
+// app/Listeners/QueryLogTracker.php
+public function handle(QueryExecuted $event)
+{
+    $sql = $this->replaceQueryPlaceholder($event->sql, $event->bindings);
+    $time = sprintf('%01.3fs', $event->time / 1000);
+    logger("($time)\n$sql");
+}
+
+private function replaceQueryPlaceholder($sql, array $bindings)
+{
+    static $QUOTE = "'";
+    static $SLASH = "\\";
+    static $PLACEHOLDER = '?';
+    $result = '';
+    $seek = 0;
+    $length = strlen($sql);
+    $escaped = $quoted = false;
+    $index = 0;
+
+    for (; $seek < $length; $seek++) {
+        $c = $sql{$seek};
+        if ($c === $QUOTE && !$escaped) {
+            $quoted = !$quoted;
+        } elseif ($c === $SLASH) {
+            $escaped = !$escaped;
+        } elseif ($c === $PLACEHOLDER && !$quoted) {
+            $value = $bindings[$index++];
+            if ($value instanceof Carbon) {
+                $value = $value->toDateTimeString();
+            } elseif ($value instanceof DateTimeInterface) {
+                $value = $value->format('Y-m-d H:i:s');
+            }
+            $c = var_export($value, true);
+        }
+        $result .= $c;
+    }
+    return $result;
+}
+```
+
+---
+
+トップ画面を表示してみると・・・1+N×2回呼ばれてる
+
+```
+select * from `things` where `rating` >= 20  
+[2020-09-08 03:41:16] local.DEBUG: (0.000s)
+select exists(select * from `likes` where `likes`.`thing_id` = 2 and `likes`.`thing_id` is not null and `ip` = 3) as `exists`  
+[2020-09-08 03:41:16] local.DEBUG: (0.001s)
+select count(*) as aggregate from `likes` where `likes`.`thing_id` = 2 and `likes`.`thing_id` is not null  
+[2020-09-08 03:41:16] local.DEBUG: (0.001s)
+select exists(select * from `likes` where `likes`.`thing_id` = 4 and `likes`.`thing_id` is not null and `ip` = 3) as `exists`  
+[2020-09-08 03:41:16] local.DEBUG: (0.000s)
+select count(*) as aggregate from `likes` where `likes`.`thing_id` = 4 and `likes`.`thing_id` is not null  
+[2020-09-08 03:41:16] local.DEBUG: (0.001s)
+select exists(select * from `likes` where `likes`.`thing_id` = 7 and `likes`.`thing_id` is not null and `ip` = 3) as `exists`  
+[2020-09-08 03:41:16] local.DEBUG: (0.001s)
+select count(*) as aggregate from `likes` where `likes`.`thing_id` = 7 and `likes`.`thing_id` is not null  
+[2020-09-08 03:41:16] local.DEBUG: (0.000s)
+select exists(select * from `likes` where `likes`.`thing_id` = 8 and `likes`.`thing_id` is not null and `ip` = 3) as `exists`  
+[2020-09-08 03:41:16] local.DEBUG: (0.001s)
+select count(*) as aggregate from `likes` where `likes`.`thing_id` = 8 and `likes`.`thing_id` is not null  
+[2020-09-08 03:41:16] local.DEBUG: (0.001s)
+select exists(select * from `likes` where `likes`.`thing_id` = 9 and `likes`.`thing_id` is not null and `ip` = 3) as `exists`  
+[2020-09-08 03:41:16] local.DEBUG: (0.001s)
+select count(*) as aggregate from `likes` where `likes`.`thing_id` = 9 and `likes`.`thing_id` is not null  
+[2020-09-08 03:41:16] local.DEBUG: (0.000s)
+select exists(select * from `likes` where `likes`.`thing_id` = 10 and `likes`.`thing_id` is not null and `ip` = 3) as `exists`  
+[2020-09-08 03:41:16] local.DEBUG: (0.001s)
+select count(*) as aggregate from `likes` where `likes`.`thing_id` = 10 and `likes`.`thing_id` is not null  
+[2020-09-08 03:41:16] local.DEBUG: (0.001s)
+select exists(select * from `likes` where `likes`.`thing_id` = 11 and `likes`.`thing_id` is not null and `ip` = 3) as `exists`  
+[2020-09-08 03:41:16] local.DEBUG: (0.001s)
+select count(*) as aggregate from `likes` where `likes`.`thing_id` = 11 and `likes`.`thing_id` is not null  
+```
+
+---
+
+カウントをEagerLoad
+
+```php
+// app/Http/Controllers/HomeController.php
+public function index(Request $request)
+{
+    $things = $this->repository->search($request->query());
+    $things->loadCount('likes');
+
+    return view('index', compact('things'));
+}
+```
+
+カウントEagerLoadしたプロパティは`{リレーション名}_count`で読み込まれる。
+
+---
+
+自分が「いいね」してるか判定をEagerLoad
+
+**集約リレーションを作るパターン**
+
+```php
+// app/Models/Thing.php
+public function myLike()
+{
+    return $this->hasOne(Like::class)
+        ->selectRaw('thing_id, count(*) > 0 as liked')
+        ->where('ip', '=', request()->ip())
+        ->groupBy(['thing_id']);
+}
+```
+
+```php
+// app/Http/Controllers/HomeController.php
+$things->load('myLike');
+```
+
+_card.blade.phpの`@if($thing->liked)`を
+`@if($thing->myLike->liked ?? false)`に変更
+
+---
+
+**条件付きカウントをするパターン**
+
+プロパティ名を`as`で指定して、連想配列にしてクロージャでクエリ条件を追加する
+
+```php
+// app/Http/Controllers/HomeController.php
+$things->loadCount(['likes as liked' => function (Builder $query) {
+    $query->where('ip', '=', request()->ip());
+}])
+```
+
+`@if($thing->liked)` で済むのでこっちの方がすっきりしてる
+
+true/falseとか件数以外の集約（合計値とか）を出したい場合は集約リレーションが使える
+
+---
+
+すっきり😄
+
+```
+[2020-09-08 03:58:54] local.DEBUG: (0.001s)
+select * from `things` where `rating` >= 20  
+[2020-09-08 03:58:54] local.DEBUG: (0.001s)
+select `id`, (select count(*) from `likes` where `things`.`id` = `likes`.`thing_id`) as `likes_count` from `things` where `things`.`id` in (2, 4, 7, 8, 9, 10, 11)  
+// 集約パターン
+[2020-09-08 03:58:54] local.DEBUG: (0.001s)
+select thing_id, count(*) > 0 as liked from `likes` where `ip` = '172.27.0.1' and `likes`.`thing_id` in (2, 4, 7, 8, 9, 10, 11) group by `thing_id`  
+// 条件付きカウントパターン
+[2020-09-08 03:58:54] local.DEBUG: (0.001s)
+select `id`, (select count(*) from `likes` where `things`.`id` = `likes`.`thing_id` and `ip` = '172.27.0.1') as `liked` from `things` where `things`.`id` in (2, 4, 7, 8, 9, 10, 11)  
+```
+
+---
+
+#### クエリ条件に使う
+
+`has($relationName)`はそのリレーションが1件以上あるかを条件にする.
+`whereHas($relationName, $closure)`でリレーション条件を追加することもできるので、「リレーション先が○○のレコードだけ取得」ができる.
+`doesntHave()`, `whereDoesntHave()`
+
+###### 「いいね」を条件に検索できるようにする
+
+```php
+$values = array_filter(preg_split('/\s+/', $value), 'strlen');
+foreach ($values as $val) {
+    if (str_starts_with($val, 'is:liked')) {
+        $query->has('myLike');
+    } else {
+        // todo: %_のエスケープをする
+        $query->where(function ($q) use ($val) {
+            $q->where('name', 'like', '%'.$val.'%')
+                ->orWhere('description', 'like', '%'.$val.'%');
+        });
+    }
+}
+```
+
+---
+
+#### リレーションの永続化
+
+外部キーなどの定義をリレーションにおまかせして永続化できる
+
+HasOne, HasMany, BelongsToMany, MorphOne, MorphMany
+```php
+$model->relation()->create($attributes);
+$model->relation()->save($model);
+```
+
+HasMany, BelongsToMany, MorphMany
+```php
+$model->relations()->createMany($attributes);
+$model->relations()->saveMany($models);
+```
+
+BelongsToManyの場合は中間テーブルのレコードも作ってくれる
+
+----
+
+BelongsTo
+```php
+// 参照先を変える
+$model->relation()->associate($parent);
+// 参照をやめる
+$model->relation()->dissociate();
+```
+
+BelongsToMany
+```php
+// 紐付ける
+$model->relations()->attach($id);
+// 解除する
+$model->relations()->detach($ids);
+// 指定した紐付けに洗い替えする
+$model->relations()->sync($ids);
+// 紐付け/解除を切り替える
+$model->relations()->toggle($ids);
+// ($idsはモデルやモデルコレクションでもいい)
+```
+
+---
+
+###### タグ機能を追加しよう
+
+1. タグマスタと中間のテーブルを追加する
+
+```sh
+$ php artisan make:model Models/Tag --controller --migration
+$ php artisan make:migration CreateTagThingTable
+```
+
+```php
+// database/migrations/xxxx_CreateTagsTable.php
+Schema::create('tags', function (Blueprint $table) {
+    $table->bigIncrements('id');
+    $table->string('name');
+    $table->timestamps();
+});
+
+// database/migrations/xxxx_CreateTagThingTable.php
+Schema::create('tag_thing', function (Blueprint $table) {
+    $table->unsignedBigInteger('tag_id');
+    $table->unsignedBigInteger('thing_id');
+    $table->timestamps();
+    $table->index(['tag_id', 'thing_id']);
+});
+```
+
+---
+
+2. Thingモデルにtagsリレーション追加
+
+```php
+// app/Models/Thing.php
+public function tags()
+{
+    return $this->belongsToMany(Tag::class);
+}
+```
+
+3. フォームにタグ一覧を追加
+
+```html
+// _form.blade.php
+<div class="form-group row">
+    <label class="col-sm-3 col-form-label" for="tag_ids">タグ</label>
+    <select class="form-control col-sm-9" name="tag_ids" id="tag_ids" multiple size="4">
+        @foreach($tags as $tag)
+            <option value="{{ $tag->id }}"
+             {{ in_array($tag->id, old('tag_ids', [])) ? 'selected' : '' }}>{{ $tag->name }}</option>
+        @endforeach
+    </select>
+</div>
+```
+
+4. タグを表示
+
+---
+
+5. タグマスタをtinkerで追加
+
+```sh
+$ php artisan tinker
+> Tag::create(['name' => '映画'])
+> Tag::create(['name' => 'アクション'])
+> Tag::create(['name' => 'SF'])
+> Tag::create(['name' => '海外ドラマ'])
+```
+
+6. ThingRepositoryで保存する
+
+```php
+$tags = Tag::find($data['tag_ids'] ?? []);
+$thing->tags()->sync($tags);
+```
+
+---
+
+#### リレーションクラスの実態
+
+`Illuminate\Database\Eloquent\Concerns\HasRelationships`
 

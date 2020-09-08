@@ -25,7 +25,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @method static static|Builder rating(int $min) 評価30以上に限定するスコープ
  * @property-read Like[]|EloquentCollection $likes いいねコレクション
  * @property-read bool $liked 現在の利用者がいいねしている
- * @property-read int $likesCount いいねされている数
+ * @property-read int $likes_count いいねされている数
+ * @property-read object $myLike {thing_id: int, liked: int(0/1)}
+ * @property-read Tag[]|EloquentCollection $tags タグコレクション
  */
 class Thing extends Model
 {
@@ -70,15 +72,18 @@ class Thing extends Model
         return $this->hasMany(Like::class);
     }
 
-    /** [accessor] {@see \App\Models\Thing::$liked} */
-    public function getLikedAttribute()
+    /** [relation] {@see \App\Models\Thing::$myLike} */
+    public function myLike()
     {
-        return $this->likes()->where('ip', '=', request()->ip())->exists();
+        return $this->hasOne(Like::class)
+            ->selectRaw('thing_id, count(*) > 0 as liked')
+            ->where('ip', '=', request()->ip())
+            ->groupBy(['thing_id']);
     }
 
-    /** [accessor] {@see \App\Models\Thing::$likesCount} */
-    public function getLikesCountAttribute()
+    /** [relation] {@see \App\Models\Thing::$tags} */
+    public function tags()
     {
-        return $this->likes()->count();
+        return $this->belongsToMany(Tag::class);
     }
 }

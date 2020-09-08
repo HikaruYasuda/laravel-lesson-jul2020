@@ -2,7 +2,9 @@
 
 namespace App\Repositories;
 
+use App\Models\Tag;
 use App\Models\Thing;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * Class ThingRepository
@@ -22,11 +24,23 @@ class ThingRepository implements Contracts\ThingRepository
         foreach (array_filter($params, 'filled') as $key => $value) {
             switch ($key) {
                 case 'q':
-                    // todo: %_のエスケープをする
-                    $query->where(function ($q) use ($value) {
-                        $q->where('name', 'like', '%'.$value.'%')
-                            ->orWhere('description', 'like', '%'.$value.'%');
-                    });
+                    $values = array_filter(preg_split('/[\s　]+/', $value), 'strlen');
+                    foreach ($values as $val) {
+                        if ($val === 'is:liked') {
+                            $query->has('myLike');
+                        } elseif (str_starts_with($val, 'tag:')) {
+                            $tag = substr($val, 4);
+                            $query->wherehas('tags', function(Builder $q) use ($tag) {
+                                $q->where('name', '=', $tag);
+                            });
+                        } else {
+                            // todo: %_のエスケープをする
+                            $query->where(function ($q) use ($val) {
+                                $q->where('name', 'like', '%'.$val.'%')
+                                    ->orWhere('description', 'like', '%'.$val.'%');
+                            });
+                        }
+                    }
                     // where (name like ? or description like ?)
                     break;
             }
@@ -47,6 +61,9 @@ class ThingRepository implements Contracts\ThingRepository
 
         $thing->save();
 
+        $tags = Tag::find($data['tag_ids'] ?? []);
+        $thing->tags()->sync($tags);
+
         return $thing;
     }
 
@@ -58,6 +75,9 @@ class ThingRepository implements Contracts\ThingRepository
         $thing->link = $data['link'] ?? null;
         $thing->rating = $data['rating'] ?? null;
         $thing->extra = $this->collectExtras($data);
+
+        $tags = Tag::find($data['tag_ids'] ?? []);
+        $thing->tags()->sync($tags);
 
         $thing->save();
 

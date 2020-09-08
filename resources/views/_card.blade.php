@@ -13,21 +13,26 @@
                             @method('delete')
                             @csrf
                             <button class="btn btn-info btn-sm" data-like="{{ $thing->id }}">
-                                いいね <[ {{ $thing->likesCount }} ]
+                                いいね <[ {{ $thing->likes_count }} ]
                             </button>
                         </form>
                     @else
                         <form action="{{ route('like.store', $thing) }}" method="post">
                             @csrf
                             <button class="btn btn-outline-secondary btn-sm" data-like="{{ $thing->id }}">
-                                いいね <[ {{ $thing->likesCount }} ]
+                                いいね <[ {{ $thing->likes_count }} ]
                             </button>
                         </form>
                     @endif
                 </div>
             @endauth
             <h5 class="card-title">{{ $thing->name }}</h5>
-            <p class="card-text text-muted"><small>{{ $thing->name_kana }}</small></p>
+            <p class="card-text">
+                タグ：
+                @foreach($thing->tags as $tag)
+                <span class="badge badge-pill badge-secondary">{{ $tag->name }}</span>
+                @endforeach
+            </p>
             <p class="card-text" style="white-space: pre-wrap">{{ $thing->description }}</p>
             @isset($thing->rating)
                 <p class="card-text">評価： {{ $thing->rating }}</p>
